@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import List, Optional
 from uuid import uuid4
@@ -11,8 +12,17 @@ from backend.app.schemas.nutrition import FoodCorrectionRequest, PortionScaleReq
 
 router = APIRouter(prefix="/food", tags=["Food Scanner"])
 
-UPLOAD_DIR = Path("backend/uploads/food")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# Use /tmp on serverless environments where root filesystem is read-only
+if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+    UPLOAD_DIR = Path("/tmp/uploads/food")
+else:
+    UPLOAD_DIR = Path("backend/uploads/food")
+
+try:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    UPLOAD_DIR = Path("/tmp/uploads/food")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_TYPES = {
     "image/jpeg": ".jpg",
