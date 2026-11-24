@@ -25,8 +25,11 @@ JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(
 raw_db_url = os.getenv("DATABASE_URL", "").strip()
 
 if not raw_db_url:
-    # Default to local SQLite database if no database URL is specified
-    DATABASE_URL = "sqlite:///./nutrimind.db"
+    # On serverless (Vercel / AWS Lambda), the filesystem is read-only except /tmp
+    if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") or os.path.exists("/tmp"):
+        DATABASE_URL = "sqlite:////tmp/nutrimind.db"
+    else:
+        DATABASE_URL = "sqlite:///./nutrimind.db"
 else:
     # Normalize postgres:// to postgresql:// for SQLAlchemy compatibility
     if raw_db_url.startswith("postgres://"):

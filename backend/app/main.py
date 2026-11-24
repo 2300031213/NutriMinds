@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -62,10 +63,12 @@ app.add_middleware(
 # Create Database Tables
 # -----------------------------
 
-try:
-    Base.metadata.create_all(bind=engine)
-except Exception as e:
-    print(f"[NutriMind AI] Database connection note: {e}")
+# Defer DB table creation on serverless so cold-start invocation never fails
+if not (os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")):
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"[NutriMind AI] Database connection note: {e}")
 
 
 # -----------------------------
