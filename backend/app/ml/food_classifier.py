@@ -20,8 +20,16 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
-import torch
-from transformers import AutoImageProcessor, AutoModelForImageClassification
+
+try:
+    import torch
+    from transformers import AutoImageProcessor, AutoModelForImageClassification
+    HAS_TORCH = True
+except Exception as _torch_err:
+    torch = None
+    AutoImageProcessor = None
+    AutoModelForImageClassification = None
+    HAS_TORCH = False
 
 from backend.app.ml.nutrition_data import lookup_nutrition
 from backend.app.ml.nutrition_service import get_food_nutrition_estimate
@@ -122,7 +130,7 @@ class MultiExpertFoodClassifier:
     _instance: Optional["MultiExpertFoodClassifier"] = None
 
     def __init__(self):
-        self.device = torch.device("cpu")
+        self.device = torch.device("cpu") if (HAS_TORCH and torch is not None) else None
 
         # 1. Load YOLOv8 Localization Model
         self.yolo = None
@@ -205,44 +213,45 @@ class MultiExpertFoodClassifier:
         res80: List[Tuple[str, float]] = []
         res15: List[Tuple[str, float]] = []
 
-        with torch.no_grad():
-            # Food-101 Prediction
-            if self.m101 is not None and self.p101 is not None:
-                inputs101 = self.p101(images=image, return_tensors="pt").to(self.device)
-                logits101 = self.m101(**inputs101).logits[0]
-                probs101 = torch.softmax(logits101, dim=-1)
-                top_p101, idx101 = torch.topk(probs101, min(10, len(probs101)))
-                res101 = [
-                    (self._get_label(self.m101.config, idx101[i].item()), top_p101[i].item())
-                    for i in range(len(top_p101))
-                ]
+        raw80_top1, raw80_top2 = 0.0, 0.0
 
-            # 80-Class Indian Regional Prediction (with temperature calibration)
-            if self.m80 is not None and self.p80 is not None:
-                inputs80 = self.p80(images=image, return_tensors="pt").to(self.device)
-                logits80 = self.m80(**inputs80).logits[0]
-                probs80_calib = torch.softmax(logits80 / 0.35, dim=-1)
-                probs80_raw = torch.softmax(logits80, dim=-1)
-                top_p80, idx80 = torch.topk(probs80_calib, min(10, len(probs80_calib)))
-                res80 = [
-                    (self._get_label(self.m80.config, idx80[i].item()), top_p80[i].item())
-                    for i in range(len(top_p80))
-                ]
-                raw80_top1 = probs80_raw[idx80[0].item()].item()
-                raw80_top2 = probs80_raw[idx80[1].item()].item() if len(idx80) > 1 else 0.001
-            else:
-                raw80_top1, raw80_top2 = 0.0, 0.0
+        if HAS_TORCH and torch is not None:
+            with torch.no_grad():
+                # Food-101 Prediction
+                if self.m101 is not None and self.p101 is not None:
+                    inputs101 = self.p101(images=image, return_tensors="pt").to(self.device)
+                    logits101 = self.m101(**inputs101).logits[0]
+                    probs101 = torch.softmax(logits101, dim=-1)
+                    top_p101, idx101 = torch.topk(probs101, min(10, len(probs101)))
+                    res101 = [
+                        (self._get_label(self.m101.config, idx101[i].item()), top_p101[i].item())
+                        for i in range(len(top_p101))
+                    ]
 
-            # 15-Class Indian Street/Staple Prediction
-            if self.m15 is not None and self.p15 is not None:
-                inputs15 = self.p15(images=image, return_tensors="pt").to(self.device)
-                logits15 = self.m15(**inputs15).logits[0]
-                probs15 = torch.softmax(logits15, dim=-1)
-                top_p15, idx15 = torch.topk(probs15, min(10, len(probs15)))
-                res15 = [
-                    (self._get_label(self.m15.config, idx15[i].item()), top_p15[i].item())
-                    for i in range(len(top_p15))
-                ]
+                # 80-Class Indian Regional Prediction (with temperature calibration)
+                if self.m80 is not None and self.p80 is not None:
+                    inputs80 = self.p80(images=image, return_tensors="pt").to(self.device)
+                    logits80 = self.m80(**inputs80).logits[0]
+                    probs80_calib = torch.softmax(logits80 / 0.35, dim=-1)
+                    probs80_raw = torch.softmax(logits80, dim=-1)
+                    top_p80, idx80 = torch.topk(probs80_calib, min(10, len(probs80_calib)))
+                    res80 = [
+                        (self._get_label(self.m80.config, idx80[i].item()), top_p80[i].item())
+                        for i in range(len(top_p80))
+                    ]
+                    raw80_top1 = probs80_raw[idx80[0].item()].item()
+                    raw80_top2 = probs80_raw[idx80[1].item()].item() if len(idx80) > 1 else 0.001
+
+                # 15-Class Indian Street/Staple Prediction
+                if self.m15 is not None and self.p15 is not None:
+                    inputs15 = self.p15(images=image, return_tensors="pt").to(self.device)
+                    logits15 = self.m15(**inputs15).logits[0]
+                    probs15 = torch.softmax(logits15, dim=-1)
+                    top_p15, idx15 = torch.topk(probs15, min(10, len(probs15)))
+                    res15 = [
+                        (self._get_label(self.m15.config, idx15[i].item()), top_p15[i].item())
+                        for i in range(len(top_p15))
+                    ]
 
         # Arbitration logic to decide top food
         chosen_food, confidence, candidate_pool = self._arbitrate(
