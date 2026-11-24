@@ -1,4 +1,5 @@
-# NutriMind AI - Core Backend & Machine Learning Dependencies
+# NutriMind AI - Production Serverless & Core Dependencies
+# Optimized for high-speed cloud deployment on Vercel Serverless (<50MB)
 
 # Web Framework & Server
 fastapi>=0.115.0
@@ -8,8 +9,8 @@ python-multipart>=0.0.9
 
 # Database & ORM
 SQLAlchemy>=2.0.30
-psycopg2-binary>=2.9.9    # Neon Serverless / PostgreSQL support
-PyMySQL>=1.1.0            # MySQL support
+psycopg2-binary>=2.9.9
+PyMySQL>=1.1.0
 python-dotenv>=1.0.0
 
 # Authentication & Security
@@ -22,16 +23,9 @@ pydantic>=2.8.0
 pydantic-core>=2.20.0
 email-validator>=2.2.0
 
-# Computer Vision & Deep Learning
-torch>=2.2.0
-torchvision>=0.17.0
-transformers>=4.40.0
-accelerate>=0.30.0
+# Computer Vision & Imaging Utilities
 pillow>=10.3.0
 numpy>=1.26.0
-scikit-learn>=1.4.0
-scipy>=1.12.0
-pandas>=2.2.0
 
 # HTTP & Utilities
 requests>=2.32.0

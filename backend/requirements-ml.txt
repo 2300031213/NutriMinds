@@ -1,0 +1,11 @@
+# NutriMind AI - Heavy Machine Learning Dependencies (Local Training & GPU)
+# Install for local model training: pip install -r backend/requirements-ml.txt
+
+torch>=2.2.0
+torchvision>=0.17.0
+transformers>=4.40.0
+accelerate>=0.30.0
+scikit-learn>=1.4.0
+scipy>=1.12.0
+pandas>=2.2.0
+ultralytics>=8.2.0
