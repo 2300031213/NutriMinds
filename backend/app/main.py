@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode
 
 # Ensure both workspace root and backend directory are in sys.path
 _current_dir = Path(__file__).resolve().parent          # backend/app
@@ -51,6 +52,8 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://localhost:4173",
         "http://127.0.0.1:4173",
+        "https://nutri-minds.vercel.app",
+        "https://nutrimind-api-tan.vercel.app",
     ],
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|.*\.vercel\.app)(:\d+)?",
     allow_credentials=True,
@@ -77,11 +80,39 @@ if not (os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")):
 
 @app.middleware("http")
 async def normalize_vercel_paths(request, call_next):
-    path = request.scope.get("path", "")
+    # 1. Check if Vercel rewrite passed the original path in __path query parameter
+    query_string = request.scope.get("query_string", b"").decode("utf-8", errors="replace")
+    params = dict(parse_qsl(query_string, keep_blank_values=True)) if query_string else {}
+    query_path = params.get("__path")
+
+    if query_path is not None:
+        target_path = "/" + query_path.lstrip("/")
+        # Clean __path from query_string so route handlers don't see internal parameter
+        clean_params = [(k, v) for k, v in parse_qsl(query_string, keep_blank_values=True) if k != "__path"]
+        request.scope["query_string"] = urlencode(clean_params).encode("utf-8")
+    else:
+        # 2. Check headers or fallback to current scope path
+        target_path = (
+            request.headers.get("x-matched-path")
+            or request.headers.get("x-invoke-path")
+            or request.headers.get("x-forwarded-uri")
+            or request.headers.get("x-original-uri")
+            or request.scope.get("path", "")
+            or "/"
+        )
+
+    # 3. Strip any static Vercel entrypoint filenames if they appear in the path
+    if "?" in target_path:
+        target_path = target_path.split("?", 1)[0]
+
     for prefix in ["/main.py", "/api/index.py", "/api/index"]:
-        if path.startswith(prefix):
-            request.scope["path"] = path[len(prefix):] or "/"
+        if target_path.startswith(prefix):
+            target_path = target_path[len(prefix):] or "/"
             break
+
+    request.scope["path"] = target_path
+    request.scope["raw_path"] = target_path.encode("utf-8")
+
     return await call_next(request)
 
 
