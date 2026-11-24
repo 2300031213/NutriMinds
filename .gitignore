@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# Local SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ML model files
+*.h5
+*.keras
+*.pth
+*.pt
+
+# Logs
+*.log
+
+# Node
+node_modules/
+
+# Build files
+dist/
+build/.env
+# Python environment
+.venv/
+
+# Model weights and checkpoints
+food_model/
+food_model_80/
+*.safetensors
+*.bin
+
+# Uploaded media
+backend/uploads/
