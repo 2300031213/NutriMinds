@@ -1,7 +1,19 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Search for .env in current working dir, backend/, or workspace root
+_candidates = [
+    Path.cwd() / ".env",
+    Path(__file__).resolve().parents[2] / ".env",
+    Path(__file__).resolve().parents[3] / ".env",
+]
+for _env_path in _candidates:
+    if _env_path.is_file():
+        load_dotenv(dotenv_path=_env_path)
+        break
+else:
+    load_dotenv()
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "nutrimind-super-secret-key-change-this-later")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")

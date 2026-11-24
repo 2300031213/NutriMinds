@@ -31,8 +31,18 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 BASE_DIR = Path(__file__).resolve().parents[3]
-MODEL_80_PATH = BASE_DIR / "food_model_80"
-MODEL_15_PATH = BASE_DIR / "food_model"
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+
+MODEL_80_PATH = (
+    BACKEND_DIR / "food_model_80"
+    if (BACKEND_DIR / "food_model_80").exists()
+    else BASE_DIR / "food_model_80"
+)
+MODEL_15_PATH = (
+    BACKEND_DIR / "food_model"
+    if (BACKEND_DIR / "food_model").exists()
+    else BASE_DIR / "food_model"
+)
 MODEL_101_NAME = "nateraw/food"
 
 # F101 generic substitutions when shown Indian cuisine outside its 101 classes
@@ -118,8 +128,17 @@ class MultiExpertFoodClassifier:
         self.yolo = None
         try:
             from ultralytics import YOLO
-            self.yolo = YOLO("yolov8n.pt")
-            print("[FoodClassifier] YOLOv8 localization engine loaded successfully.")
+            yolo_file = "yolov8n.pt"
+            for candidate in [
+                BACKEND_DIR / "yolov8n.pt",
+                BASE_DIR / "yolov8n.pt",
+                Path("yolov8n.pt"),
+            ]:
+                if candidate.exists():
+                    yolo_file = str(candidate)
+                    break
+            self.yolo = YOLO(yolo_file)
+            print(f"[FoodClassifier] YOLOv8 localization engine loaded successfully from {yolo_file}.")
         except Exception as e:
             print(f"[FoodClassifier] Warning: Could not load YOLOv8: {e}")
 

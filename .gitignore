@@ -49,6 +49,10 @@ build/.env
 # Model weights and checkpoints
 food_model/
 food_model_80/
+backend/food_model/
+backend/food_model_80/
+ml_dataset/
+backend/ml_dataset/
 *.safetensors
 *.bin
 
