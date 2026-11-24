@@ -78,8 +78,10 @@ if not (os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")):
 @app.middleware("http")
 async def normalize_vercel_paths(request, call_next):
     path = request.scope.get("path", "")
-    if path.startswith("/api/index"):
-        request.scope["path"] = path[len("/api/index"):] or "/"
+    for prefix in ["/main.py", "/api/index.py", "/api/index"]:
+        if path.startswith(prefix):
+            request.scope["path"] = path[len(prefix):] or "/"
+            break
     return await call_next(request)
 
 
