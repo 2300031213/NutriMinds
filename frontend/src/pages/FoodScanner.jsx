@@ -372,6 +372,11 @@ function FoodScanner() {
       setAddedSummary(res.data);
     } catch (err) {
       console.error("Nutrition log failed:", err);
+      if (err?.response?.status === 401) {
+        alert("Please sign in or create an account to save meals to your nutrition journal.");
+        navigate("/auth");
+        return;
+      }
       alert(err?.response?.data?.detail || "Unable to save meal to daily nutrition journal.");
     } finally {
       setIsAdding(false);
