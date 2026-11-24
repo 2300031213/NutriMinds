@@ -72,22 +72,43 @@ if not (os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")):
 
 
 # -----------------------------
-# API Routes
+# Path Normalizer Middleware (Vercel Compatibility)
 # -----------------------------
 
-app.include_router(auth_router)
-app.include_router(users_router)
-app.include_router(profiles_router)
-app.include_router(food_router)
-app.include_router(nutrition_router)
-app.include_router(lifestyle.router)
-app.include_router(wellness.router)
-app.include_router(recommendations.router)
+@app.middleware("http")
+async def normalize_vercel_paths(request, call_next):
+    path = request.scope.get("path", "")
+    if path.startswith("/api/index"):
+        request.scope["path"] = path[len("/api/index"):] or "/"
+    return await call_next(request)
+
+
 # -----------------------------
-# Root Endpoint
+# API Routes (Registered under both root and /api prefixes)
+# -----------------------------
+
+routers = [
+    auth_router,
+    users_router,
+    profiles_router,
+    food_router,
+    nutrition_router,
+    lifestyle.router,
+    wellness.router,
+    recommendations.router,
+]
+
+for r in routers:
+    app.include_router(r)
+    app.include_router(r, prefix="/api")
+
+
+# -----------------------------
+# Root & Health Endpoints
 # -----------------------------
 
 @app.get("/")
+@app.get("/api")
 def root():
     return {
         "message": "Welcome to NutriMind AI",
@@ -95,11 +116,8 @@ def root():
     }
 
 
-# -----------------------------
-# Health Check
-# -----------------------------
-
 @app.get("/health")
+@app.get("/api/health")
 def health_check():
     return {
         "status": "healthy"
