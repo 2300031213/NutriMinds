@@ -439,33 +439,50 @@ class MultiExpertFoodClassifier:
 
         green = (g > r * 1.1) & (g > b * 1.1) & (g > 40)
         blue_purple = (b > r * 0.95) & (b > g * 0.95) & (b > 45) & (r < 110)
-        orange = (r > 150) & (g > 80) & (g < 170) & (b < 95)
-        yellow = (r > 160) & (g > 140) & (b < 100)
-        red = (r > 150) & (g < 85) & (b < 85)
-        white = (r > 190) & (g > 190) & (b > 190)
-        dark_brown = (r > 60) & (r < 140) & (g > 40) & (g < 100) & (b < 70)
+        orange = (r > 160) & (g > 70) & (g < 150) & (b < 80)
+        yellow = (r > 160) & (g > 140) & (b < 90)
+        red = (r > 150) & (g < 80) & (b < 80)
+        white_cream = (r > 180) & (g > 170) & (b > 130)
+        baked_crust = (r > 120) & (r < 220) & (g > 85) & (g < 175) & (b > 50) & (b < 135) & (r > g) & (g > b)
+        charred_spots = (r < 80) & (g < 60) & (b < 50)
 
         p_green = float(np.sum(green) / total_px)
         p_blue_purple = float(np.sum(blue_purple) / total_px)
         p_orange = float(np.sum(orange) / total_px)
         p_yellow = float(np.sum(yellow) / total_px)
         p_red = float(np.sum(red) / total_px)
-        p_white = float(np.sum(white) / total_px)
-        p_brown = float(np.sum(dark_brown) / total_px)
+        p_white_cream = float(np.sum(white_cream) / total_px)
+        p_crust = float(np.sum(baked_crust) / total_px)
+        p_charred = float(np.sum(charred_spots) / total_px)
 
-        has_berries_grapes = p_blue_purple > 0.04
+        # Baked flatbread detection: high crust/dough + charred tandoor spots + low fresh colors
+        is_flatbread = (
+            (p_crust > 0.16 or (p_white_cream > 0.25 and p_crust > 0.08))
+            and (p_charred > 0.08)
+            and (p_blue_purple < 0.05)
+            and (p_green < 0.03)
+        )
+
+        has_berries_grapes = p_blue_purple > 0.06
         has_greens = p_green > 0.08
-        has_orange_fruits = p_orange > 0.05
         color_channels_present = sum([
             p_green > 0.03,
-            p_blue_purple > 0.03,
+            p_blue_purple > 0.05,
             p_orange > 0.03,
             p_red > 0.02,
-            p_yellow > 0.03,
         ])
 
-        # 1. Fresh fruit salad / mixed berries / colorful fruit bowl
-        if has_berries_grapes or (color_channels_present >= 2 and (has_orange_fruits or p_green > 0.03)):
+        # 1. Baked flatbreads: Naan / Roti / Paratha / Bhatura
+        if is_flatbread:
+            return "naan", 0.82, [
+                ("naan", 0.82),
+                ("roti", 0.74),
+                ("bhatura", 0.68),
+                ("chapati", 0.64),
+                ("paratha", 0.60),
+            ]
+        # 2. Fresh fruit salad / mixed berries / colorful fruit bowl
+        elif has_berries_grapes or (color_channels_present >= 2 and (p_green > 0.03 or p_blue_purple > 0.04)):
             return "fruit_salad", 0.85, [
                 ("fruit_salad", 0.85),
                 ("greek_salad", 0.72),
@@ -473,7 +490,7 @@ class MultiExpertFoodClassifier:
                 ("apple", 0.60),
                 ("strawberry_shortcake", 0.55),
             ]
-        # 2. Leafy greens / Palak paneer
+        # 3. Leafy greens / Palak paneer
         elif has_greens and p_green > 0.15:
             return "palak_paneer", 0.82, [
                 ("palak_paneer", 0.82),
@@ -481,7 +498,7 @@ class MultiExpertFoodClassifier:
                 ("caesar_salad", 0.68),
                 ("saag", 0.64),
             ]
-        # 3. Rich red tomato/gravy: Paneer butter masala / pizza / pasta
+        # 4. Rich red tomato/gravy: Paneer butter masala / pizza / pasta
         elif p_red > 0.12 or (p_orange > 0.15 and p_red > 0.06):
             return "paneer_butter_masala", 0.80, [
                 ("paneer_butter_masala", 0.80),
@@ -489,7 +506,7 @@ class MultiExpertFoodClassifier:
                 ("pizza", 0.70),
                 ("pasta", 0.65),
             ]
-        # 4. Golden yellow stew/gravy: Dal tadka / dal makhani
+        # 5. Golden yellow stew/gravy: Dal tadka / dal makhani
         elif p_yellow > 0.15 or p_orange > 0.18:
             return "dal_tadka", 0.80, [
                 ("dal_tadka", 0.80),
@@ -497,21 +514,13 @@ class MultiExpertFoodClassifier:
                 ("sambar", 0.68),
                 ("cholebhature", 0.64),
             ]
-        # 5. Dominated by white: Idli / curd rice / plain rice
-        elif p_white > 0.30:
+        # 6. Dominated by white: Idli / curd rice / plain rice
+        elif p_white_cream > 0.35:
             return "idli", 0.82, [
                 ("idli", 0.82),
                 ("curd_rice", 0.75),
                 ("plain_rice", 0.70),
                 ("dosa", 0.65),
-            ]
-        # 6. Flatbreads / baked crust: Roti / naan / paratha
-        elif p_brown > 0.20:
-            return "roti", 0.78, [
-                ("roti", 0.78),
-                ("naan", 0.72),
-                ("paratha", 0.68),
-                ("chapati", 0.64),
             ]
         # 7. Default to biryani / spiced rice dishes
         else:
