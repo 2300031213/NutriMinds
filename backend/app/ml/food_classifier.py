@@ -16,6 +16,7 @@ multi-dish thali decomposition, portion estimation, and explainability metadata.
 """
 
 import base64
+import io
 import json
 import os
 from pathlib import Path
@@ -59,8 +60,8 @@ MODEL_101_NAME = "nateraw/food"
 
 # F101 generic substitutions when shown Indian cuisine outside its 101 classes
 F101_INDIAN_CONFUSIONS: Dict[str, List[str]] = {
-    "fried_rice": ["biryani", "poha", "pulao", "jeera_rice", "curd_rice", "plain_rice", "khichdi"],
-    "garlic_bread": ["naan", "garlic_naan", "butter_naan", "pavbhaji", "bhatura", "chapati", "paratha", "roti"],
+    "fried_rice": ["biryani", "poha", "pulao", "jeera_rice", "curd_rice", "plain_rice", "khichdi", "chicken_biryani", "mutton_biryani", "veg_biryani"],
+    "garlic_bread": ["naan", "garlic_naan", "butter_naan", "pavbhaji", "bhatura", "chapati", "paratha", "roti", "kulcha", "tandoori_roti"],
     "chicken_curry": [
         "butter_chicken",
         "chicken_tikka_masala",
@@ -76,18 +77,25 @@ F101_INDIAN_CONFUSIONS: Dict[str, List[str]] = {
         "aloo_matar",
         "aloo_gobi",
         "navrattan_korma",
+        "palak_paneer",
     ],
     "sashimi": ["jalebi", "imarti"],
-    "macarons": ["gulab_jamun", "rasgulla", "laddu", "motichoor_laddu", "ledikeni", "bandar_laddu", "cham_cham"],
-    "escargots": ["panipuri", "palak_paneer", "saag", "pani_puri"],
-    "gnocchi": ["rasgulla", "gulab_jamun", "cham_cham", "ledikeni", "ras_malai"],
+    "macarons": ["gulab_jamun", "rasgulla", "laddu", "motichoor_laddu", "ledikeni", "bandar_laddu", "cham_cham", "sandesh"],
+    "escargots": ["gulab_jamun", "ledikeni", "rasgulla", "panipuri", "palak_paneer", "saag", "unni_appam"],
+    "gnocchi": ["rasgulla", "gulab_jamun", "cham_cham", "ledikeni", "ras_malai", "sandesh"],
+    "takoyaki": ["gulab_jamun", "ledikeni", "kofta", "panipuri", "unni_appam", "bonda", "pakora"],
+    "beignets": ["gulab_jamun", "jalebi", "bhatura", "kachori", "malapua"],
+    "donuts": ["medu_vada", "vada", "balushahi", "gulab_jamun", "anarsa"],
+    "meatballs": ["gulab_jamun", "kofta", "laddu", "bandar_laddu"],
+    "pancakes": ["dosa", "masala_dosa", "uttapam", "appam", "cheela"],
+    "crepes": ["dosa", "masala_dosa", "rava_dosa", "set_dosa"],
+    "waffles": ["dosa", "kachori", "ghevar"],
     "omelette": ["dosa", "masala_dosa", "uttapam"],
-    "hummus": ["dal_makhani", "dal_tadka", "pavbhaji", "kadhi_pakoda", "dal"],
+    "hummus": ["dal_makhani", "dal_tadka", "pavbhaji", "kadhi_pakoda", "dal", "sambar"],
     "crab_cakes": ["pakora", "aloo_tikki", "vada", "kofta", "garelu"],
-    "falafel": ["pakora", "vada", "kofta", "aloo_tikki"],
-    "baklava": ["panipuri", "kajjikaya", "gujiya", "pootharekulu"],
+    "falafel": ["pakora", "vada", "kofta", "aloo_tikki", "garelu"],
+    "baklava": ["panipuri", "kajjikaya", "gujiya", "pootharekulu", "mysore_pak"],
     "chicken_quesadilla": ["chapati", "paratha", "kathiroll", "roti", "daal_puri"],
-    "takoyaki": ["panipuri", "gulab_jamun", "pakora", "unni_appam"],
 }
 
 # COCO food & dish container classes suitable for candidate region proposal
@@ -376,17 +384,29 @@ class MultiExpertFoodClassifier:
     @staticmethod
     def _classify_with_gemini(image_path: str) -> Optional[Dict[str, Any]]:
         """
-        Cloud Vision AI inference using Google Gemini 1.5/2.0 Flash multimodal model.
+        Cloud Vision AI inference using Google Gemini multimodal models.
         Available when GEMINI_API_KEY environment variable is set.
+        Automatically scales/optimizes image and tries active models in fallback sequence.
         """
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             return None
         try:
-            with open(image_path, "rb") as f:
-                b64_data = base64.b64encode(f.read()).decode("utf-8")
+            with Image.open(image_path) as pil_img:
+                comp_img = pil_img.convert("RGB")
+                comp_img.thumbnail((400, 400))
+                buf = io.BytesIO()
+                comp_img.save(buf, format="JPEG", quality=75)
+                b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+            candidate_models = [
+                "gemini-3.5-flash-lite",
+                "gemini-flash-latest",
+                "gemini-3.8-flash",
+                "gemini-3.7-flash",
+                "gemini-2.5-flash",
+            ]
+
             payload = {
                 "contents": [
                     {
@@ -395,8 +415,8 @@ class MultiExpertFoodClassifier:
                                 "text": (
                                     "You are an expert nutritionist and computer vision AI. "
                                     "Analyze this meal photo. Return ONLY a valid JSON object formatted as: "
-                                    '{"food_name": "snake_case_name", "display_name": "Human Name", "category": "Category", "confidence": 0.92, "candidates": ["name1", "name2", "name3"]}. '
-                                    "Examples of food_name: fruit_salad, greek_salad, caesar_salad, pizza, hamburger, biryani, dal_makhani, butter_chicken, dosa, idli, paneer_butter_masala, pasta, sushi, ramen, sandwich, oatmeal, smoothie_bowl, apple, etc."
+                                    '{"food_name": "snake_case_name", "display_name": "Human Name", "category": "Category", "confidence": 0.95, "candidates": ["name1", "name2", "name3"]}. '
+                                    "Examples of food_name: gulab_jamun, naan, biryani, fruit_salad, palak_paneer, paneer_butter_masala, butter_chicken, dosa, idli, dal_makhani, dal_tadka, samosa, pizza, burger, pasta, etc."
                                 )
                             },
                             {
@@ -412,13 +432,21 @@ class MultiExpertFoodClassifier:
                     "response_mime_type": "application/json"
                 },
             }
-            res = requests.post(url, json=payload, timeout=6)
-            if res.status_code == 200:
-                result_json = res.json()
-                text = result_json["candidates"][0]["content"]["parts"][0]["text"]
-                parsed = json.loads(text)
-                if parsed and parsed.get("food_name"):
-                    return parsed
+
+            for model_name in candidate_models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+                try:
+                    res = requests.post(url, json=payload, timeout=8)
+                    if res.status_code == 200:
+                        result_json = res.json()
+                        text = result_json["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        if text.startswith("```"):
+                            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                        parsed = json.loads(text)
+                        if parsed and parsed.get("food_name"):
+                            return parsed
+                except Exception:
+                    continue
         except Exception as e:
             print(f"[FoodClassifier] Gemini Vision note: {e}")
         return None
@@ -439,12 +467,21 @@ class MultiExpertFoodClassifier:
 
         green = (g > r * 1.1) & (g > b * 1.1) & (g > 40)
         blue_purple = (b > r * 0.95) & (b > g * 0.95) & (b > 45) & (r < 110)
-        orange = (r > 160) & (g > 70) & (g < 150) & (b < 80)
+        orange = (r > 160) & (g > 70) & (g < 155) & (b < 80)
         yellow = (r > 160) & (g > 140) & (b < 90)
         red = (r > 150) & (g < 80) & (b < 80)
         white_cream = (r > 180) & (g > 170) & (b > 130)
-        baked_crust = (r > 120) & (r < 220) & (g > 85) & (g < 175) & (b > 50) & (b < 135) & (r > g) & (g > b)
-        charred_spots = (r < 80) & (g < 60) & (b < 50)
+        baked_crust = (r > 120) & (r < 235) & (g > 85) & (g < 195) & (b > 50) & (b < 155) & (r > g) & (g > b)
+        charred_spots = (r < 85) & (g < 65) & (b < 55)
+
+        # Amber / dark brown sweet balls in syrup (Gulab Jamun, Ledikeni)
+        jamun_amber = (r > 70) & (r < 190) & (g > 30) & (g < 120) & (b < 80) & (r > g + 22) & (g > b)
+
+        # Distinct fruit pieces in fruit salad (grapes, berries, citrus, apple)
+        green_grapes = (g > 110) & (g > r * 0.95) & (g > b * 1.05) & (r > 75)
+        blue_berries = (b > 55) & (b > g * 0.9) & (r < 115)
+        orange_fruit = (r > 160) & (g > 90) & (g < 170) & (b < 85)
+        apple_melon = (r > 170) & (g > 160) & (b > 105) & (r < 235) & (g < 235)
 
         p_green = float(np.sum(green) / total_px)
         p_blue_purple = float(np.sum(blue_purple) / total_px)
@@ -454,82 +491,94 @@ class MultiExpertFoodClassifier:
         p_white_cream = float(np.sum(white_cream) / total_px)
         p_crust = float(np.sum(baked_crust) / total_px)
         p_charred = float(np.sum(charred_spots) / total_px)
+        p_jamun = float(np.sum(jamun_amber) / total_px)
 
-        # Baked flatbread detection: high crust/dough + charred tandoor spots + low fresh colors
-        is_flatbread = (
-            (p_crust > 0.16 or (p_white_cream > 0.25 and p_crust > 0.08))
-            and (p_charred > 0.08)
-            and (p_blue_purple < 0.05)
-            and (p_green < 0.03)
-        )
+        p_fruits = float(np.sum(green_grapes | blue_berries | orange_fruit | apple_melon) / total_px)
 
-        has_berries_grapes = p_blue_purple > 0.06
-        has_greens = p_green > 0.08
-        color_channels_present = sum([
-            p_green > 0.03,
-            p_blue_purple > 0.05,
-            p_orange > 0.03,
-            p_red > 0.02,
-        ])
+        # 1. Spiced rice with heavy browned onions/grains: Biryani / Pulao
+        if p_charred > 0.28:
+            return "biryani", 0.85, [
+                ("biryani", 0.85),
+                ("chicken_biryani", 0.80),
+                ("mutton_biryani", 0.75),
+                ("pulao", 0.70),
+                ("fried_rice", 0.65),
+            ]
 
-        # 1. Baked flatbreads: Naan / Roti / Paratha / Bhatura
-        if is_flatbread:
-            return "naan", 0.82, [
-                ("naan", 0.82),
-                ("roti", 0.74),
-                ("bhatura", 0.68),
-                ("chapati", 0.64),
-                ("paratha", 0.60),
+        # 2. Baked flatbreads: Naan / Roti / Paratha / Bhatura
+        if p_crust > 0.22 and p_charred > 0.07:
+            return "naan", 0.84, [
+                ("naan", 0.84),
+                ("garlic_naan", 0.78),
+                ("butter_naan", 0.74),
+                ("roti", 0.70),
+                ("bhatura", 0.65),
             ]
-        # 2. Fresh fruit salad / mixed berries / colorful fruit bowl
-        elif has_berries_grapes or (color_channels_present >= 2 and (p_green > 0.03 or p_blue_purple > 0.04)):
-            return "fruit_salad", 0.85, [
-                ("fruit_salad", 0.85),
-                ("greek_salad", 0.72),
-                ("caesar_salad", 0.65),
-                ("apple", 0.60),
-                ("strawberry_shortcake", 0.55),
+
+        # 3. Gulab Jamun (dark amber/brown sweet balls in syrup)
+        if p_jamun > 0.14 and p_crust < 0.22:
+            return "gulab_jamun", 0.86, [
+                ("gulab_jamun", 0.86),
+                ("ledikeni", 0.78),
+                ("rasgulla", 0.70),
+                ("jalebi", 0.65),
+                ("ras_malai", 0.60),
             ]
-        # 3. Leafy greens / Palak paneer
-        elif has_greens and p_green > 0.15:
-            return "palak_paneer", 0.82, [
-                ("palak_paneer", 0.82),
-                ("green_salad", 0.75),
-                ("caesar_salad", 0.68),
-                ("saag", 0.64),
+
+        # 4. Fresh fruit salad / mixed colorful fruit bowl
+        if p_fruits > 0.35:
+            return "fruit_salad", 0.88, [
+                ("fruit_salad", 0.88),
+                ("greek_salad", 0.74),
+                ("apple", 0.68),
+                ("watermelon", 0.62),
+                ("strawberry_shortcake", 0.58),
             ]
-        # 4. Rich red tomato/gravy: Paneer butter masala / pizza / pasta
-        elif p_red > 0.12 or (p_orange > 0.15 and p_red > 0.06):
-            return "paneer_butter_masala", 0.80, [
-                ("paneer_butter_masala", 0.80),
-                ("butter_chicken", 0.75),
-                ("pizza", 0.70),
-                ("pasta", 0.65),
+
+        # 5. Leafy greens / Palak paneer
+        if p_green > 0.12:
+            return "palak_paneer", 0.84, [
+                ("palak_paneer", 0.84),
+                ("green_salad", 0.76),
+                ("saag", 0.70),
+                ("caesar_salad", 0.64),
             ]
-        # 5. Golden yellow stew/gravy: Dal tadka / dal makhani
-        elif p_yellow > 0.15 or p_orange > 0.18:
-            return "dal_tadka", 0.80, [
-                ("dal_tadka", 0.80),
-                ("dal_makhani", 0.74),
-                ("sambar", 0.68),
+
+        # 6. Rich red tomato/gravy: Paneer butter masala / butter chicken
+        if p_red > 0.12 or (p_orange > 0.15 and p_red > 0.06):
+            return "paneer_butter_masala", 0.82, [
+                ("paneer_butter_masala", 0.82),
+                ("butter_chicken", 0.77),
+                ("chicken_tikka_masala", 0.72),
+                ("pizza", 0.66),
+            ]
+
+        # 7. Golden yellow stew/gravy: Dal tadka / dal makhani
+        if p_yellow > 0.15 or p_orange > 0.18:
+            return "dal_tadka", 0.82, [
+                ("dal_tadka", 0.82),
+                ("dal_makhani", 0.75),
+                ("sambar", 0.70),
                 ("cholebhature", 0.64),
             ]
-        # 6. Dominated by white: Idli / curd rice / plain rice
-        elif p_white_cream > 0.35:
-            return "idli", 0.82, [
-                ("idli", 0.82),
-                ("curd_rice", 0.75),
+
+        # 8. Dominated by white: Idli / curd rice / plain rice
+        if p_white_cream > 0.35:
+            return "idli", 0.84, [
+                ("idli", 0.84),
+                ("curd_rice", 0.76),
                 ("plain_rice", 0.70),
                 ("dosa", 0.65),
             ]
-        # 7. Default to biryani / spiced rice dishes
-        else:
-            return "biryani", 0.75, [
-                ("biryani", 0.75),
-                ("fried_rice", 0.70),
-                ("pulao", 0.65),
-                ("khichdi", 0.60),
-            ]
+
+        # 9. Spiced rice / Biryani
+        return "biryani", 0.82, [
+            ("biryani", 0.82),
+            ("chicken_biryani", 0.76),
+            ("mutton_biryani", 0.72),
+            ("pulao", 0.68),
+            ("fried_rice", 0.64),
+        ]
 
     def predict(self, image_path: str, top_k: int = 5) -> Dict[str, Any]:
         """
@@ -786,35 +835,40 @@ class MultiExpertFoodClassifier:
 
         # -------------------------------------------------------------
         # Branch A: F101 predicted a known confusion/approximation class
-        # (e.g., F101 guessed chicken_curry, fried_rice, garlic_bread, sashimi, macarons)
+        # (e.g., F101 guessed chicken_curry, fried_rice, garlic_bread, sashimi, macarons, escargots)
         # -------------------------------------------------------------
         if l101_1 in F101_INDIAN_CONFUSIONS:
-            # 1. Specialized street or staple food from M15 that matches the confusion family
-            if m15_in_conf and s15_1 > 0.50:
-                chosen = l15_1
-                conf = s15_1
+            # 1. Indian sweets from M80 should always take precedence over M15 street foods
+            if l80_1 in {"gulab_jamun", "ledikeni", "rasgulla", "ras_malai", "jalebi", "kheer", "halwa", "laddu", "cham_cham", "sandesh", "peda", "mysore_pak"} and (m80_family_match or raw80_top1 > 0.035):
+                chosen = l80_1
+                conf = max(s80_1, 0.86)
 
             # 2. Regional dish from M80 that specifically matches the confusion category
             elif m80_family_match:
                 chosen = l80_1
                 conf = max(s80_1, 0.85)
 
-            # 3. M15 match with moderate confidence
+            # 3. Specialized street or staple food from M15 that matches the confusion family
+            elif m15_in_conf and s15_1 > 0.50:
+                chosen = l15_1
+                conf = s15_1
+
+            # 4. M15 match with moderate confidence
             elif m15_in_conf and m15_strong:
                 chosen = l15_1
                 conf = max(s15_1, 0.80)
 
-            # 4. High-confidence street food from M15 not represented in F101
+            # 5. High-confidence street food from M15 not represented in F101
             elif l15_1 in street_foods_15 and s15_1 > 0.70:
                 chosen = l15_1
                 conf = s15_1
 
-            # 5. Regional dish with distinct standalone margin
+            # 6. Regional dish with distinct standalone margin
             elif raw80_top1 > 0.045 and ratio80 > 1.25:
                 chosen = l80_1
                 conf = max(s80_1, 0.82)
 
-            # 6. Default to F101 if no Indian model claimed it
+            # 7. Default to F101 if no Indian model claimed it
             else:
                 chosen = l101_1
                 conf = s101_1
@@ -824,7 +878,10 @@ class MultiExpertFoodClassifier:
         # (e.g., donuts, onion_rings, samosa, pizza, tacos, hamburger)
         # -------------------------------------------------------------
         else:
-            if l15_1 in street_foods_15 and s15_1 > 0.70:
+            if l80_1 in {"gulab_jamun", "ledikeni", "rasgulla", "jalebi", "ras_malai"} and raw80_top1 > 0.04 and ratio80 > 1.2:
+                chosen = l80_1
+                conf = max(s80_1, 0.86)
+            elif l15_1 in street_foods_15 and s15_1 > 0.70:
                 chosen = l15_1
                 conf = s15_1
             elif l80_1 in ["jalebi", "rasgulla"] and raw80_top1 > 0.07 and ratio80 > 1.8:
