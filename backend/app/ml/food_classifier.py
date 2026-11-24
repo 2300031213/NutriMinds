@@ -414,9 +414,29 @@ class MultiExpertFoodClassifier:
                             {
                                 "text": (
                                     "You are an expert nutritionist and computer vision AI. "
-                                    "Analyze this meal photo. Return ONLY a valid JSON object formatted as: "
-                                    '{"food_name": "snake_case_name", "display_name": "Human Name", "category": "Category", "confidence": 0.95, "candidates": ["name1", "name2", "name3"]}. '
-                                    "Examples of food_name: gulab_jamun, naan, biryani, fruit_salad, palak_paneer, paneer_butter_masala, butter_chicken, dosa, idli, dal_makhani, dal_tadka, samosa, pizza, burger, pasta, etc."
+                                    "Analyze this meal photo. Check whether it is a single dish or a multi-item platter / Indian Thali containing multiple distinct dishes on a single plate. "
+                                    "Return ONLY a valid JSON object formatted as: "
+                                    "{\n"
+                                    '  "is_multi_item": false,\n'
+                                    '  "food_name": "snake_case_name",\n'
+                                    '  "display_name": "Human Name",\n'
+                                    '  "category": "Category",\n'
+                                    '  "confidence": 0.95,\n'
+                                    '  "candidates": ["alt1", "alt2"],\n'
+                                    '  "items": [\n'
+                                    '    {\n'
+                                    '      "food_name": "snake_case_name",\n'
+                                    '      "display_name": "Dish Name",\n'
+                                    '      "category": "Category",\n'
+                                    '      "confidence": 0.95,\n'
+                                    '      "box": [10.0, 15.0, 40.0, 45.0]\n'
+                                    '    }\n'
+                                    '  ]\n'
+                                    "}\n"
+                                    "Rules:\n"
+                                    "1. If it is a thali, combo plate, or platter with multiple distinct foods (e.g. rice, dal, roti, sabzi, sweet), set is_multi_item to true and list EACH distinct dish in 'items' with approximate percentage bounding boxes [x1, y1, x2, y2] from 0 to 100.\n"
+                                    "2. If it is a single food dish, set is_multi_item to false.\n"
+                                    "Examples of food_name: dal_makhani, dal_tadka, plain_rice, biryani, roti, naan, paneer_butter_masala, palak_paneer, gulab_jamun, rasgulla, fruit_salad, sambar, etc."
                                 )
                             },
                             {
@@ -596,9 +616,70 @@ class MultiExpertFoodClassifier:
         image = Image.open(image_path).convert("RGB")
         width, height = image.size
 
-        # Cloud Vision AI check (Gemini 1.5/2.0 Flash)
+        # Cloud Vision AI check (Gemini Flash multimodal)
         gemini_result = self._classify_with_gemini(image_path)
         if gemini_result:
+            raw_multi_items = gemini_result.get("items") or []
+            if gemini_result.get("is_multi_item") and len(raw_multi_items) > 1:
+                # Multi-dish thali platter detected
+                thali_items = []
+                for idx, itm in enumerate(raw_multi_items):
+                    f_key = itm.get("food_name", "unknown")
+                    nut = get_food_nutrition_estimate(f_key)
+                    disp = itm.get("display_name") or nut.get("display_name") or f_key.replace("_", " ").title()
+                    cat = itm.get("category") or nut.get("category", "Food")
+                    sc = round(float(itm.get("confidence", 0.92)) * 100, 2)
+                    raw_b = itm.get("box", [0.0, 0.0, 100.0, 100.0])
+                    box = [float(c) for c in raw_b] if len(raw_b) >= 4 else [0.0, 0.0, 100.0, 100.0]
+
+                    thali_items.append({
+                        "id": f"item_{idx + 1}",
+                        "food": f_key,
+                        "display_name": disp,
+                        "category": cat,
+                        "score": sc,
+                        "box": [round(c, 1) for c in box],
+                        "box_px": [
+                            round((box[0] / 100.0) * width, 1),
+                            round((box[1] / 100.0) * height, 1),
+                            round((box[2] / 100.0) * width, 1),
+                            round((box[3] / 100.0) * height, 1),
+                        ],
+                        "top_predictions": [{"food": f_key, "display_name": disp, "category": cat, "score": sc}],
+                        "nutrition": nut,
+                        "serving_multiplier": 1.0,
+                        "custom_grams": nut.get("serving_weight_g", 150.0),
+                    })
+
+                comb_cals = sum(float(it["nutrition"].get("calories", 0.0)) for it in thali_items)
+                comb_protein = sum(float(it["nutrition"].get("protein", 0.0)) for it in thali_items)
+                comb_carbs = sum(float(it["nutrition"].get("carbohydrates", 0.0)) for it in thali_items)
+                comb_fats = sum(float(it["nutrition"].get("fats", 0.0)) for it in thali_items)
+                comb_fibre = sum(float(it["nutrition"].get("fibre", 0.0)) for it in thali_items)
+                comb_sugar = sum(float(it["nutrition"].get("sugar", 0.0)) for it in thali_items)
+                comb_sodium = sum(float(it["nutrition"].get("sodium", 0.0)) for it in thali_items)
+
+                return {
+                    "is_multi_item": True,
+                    "detected_items": thali_items,
+                    "combined_nutrition": {
+                        "calories": round(comb_cals, 1),
+                        "protein": round(comb_protein, 1),
+                        "carbohydrates": round(comb_carbs, 1),
+                        "fats": round(comb_fats, 1),
+                        "fibre": round(comb_fibre, 1),
+                        "sugar": round(comb_sugar, 1),
+                        "sodium": round(comb_sodium, 1),
+                        "item_count": len(thali_items),
+                    },
+                    "food": "thali",
+                    "display_name": "Indian Thali Platter",
+                    "category": "Thali / Combo Meal",
+                    "score": thali_items[0]["score"],
+                    "top_predictions": [{"food": it["food"], "display_name": it["display_name"], "score": it["score"]} for it in thali_items],
+                    "nutrition": thali_items[0]["nutrition"],
+                }
+
             food_key = gemini_result["food_name"]
             nutrition = get_food_nutrition_estimate(food_key)
             display_name = (
